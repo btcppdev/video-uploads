@@ -1,0 +1,166 @@
+name: Release desktop apps
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.24.x"
+  NODE_VERSION: "22"
+  WAILS_VERSION: "v2.12.0"
+
+jobs:
+  build:
+    name: Build ${{ matrix.artifact }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: darwin/arm64
+            artifact: macos-arm64
+          - runner: macos-15-intel
+            platform: darwin/amd64
+            artifact: macos-amd64
+          - runner: windows-2025
+            platform: windows/amd64
+            artifact: windows-x64
+          - runner: ubuntu-22.04
+            platform: linux/amd64
+            artifact: linux-x64
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Set application version from tag
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          node -e 'const fs=require("fs"); const p="wails.json"; const data=JSON.parse(fs.readFileSync(p)); data.info.productVersion=process.argv[1]; fs.writeFileSync(p, JSON.stringify(data, null, 2)+"\n")' "$version"
+
+      - name: Install Linux build libraries
+        if: matrix.artifact == 'linux-x64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libgtk-3-dev libwebkit2gtk-4.0-dev
+
+      - name: Install NSIS
+        if: matrix.artifact == 'windows-x64'
+        shell: pwsh
+        run: choco install nsis -y --no-progress
+
+      - name: Install Wails
+        shell: bash
+        run: |
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          go install github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}
+
+      - name: Install frontend dependencies
+        shell: bash
+        run: npm ci --prefix frontend
+
+      - name: Run checks
+        if: matrix.artifact == 'linux-x64'
+        shell: bash
+        run: |
+          go test ./...
+          npm --prefix frontend run check
+
+      - name: Build macOS app
+        if: startsWith(matrix.artifact, 'macos-')
+        shell: bash
+        run: wails build -platform "${{ matrix.platform }}"
+
+      - name: Package macOS app
+        if: startsWith(matrix.artifact, 'macos-')
+        shell: bash
+        run: |
+          mkdir -p dist
+          app_path="$(find build/bin -maxdepth 1 -name '*.app' -print -quit)"
+          test -n "$app_path"
+          ditto -c -k --sequesterRsrc --keepParent "$app_path" "dist/bitcoin++-videos-${GITHUB_REF_NAME}-${{ matrix.artifact }}.zip"
+
+      - name: Build Windows installer
+        if: matrix.artifact == 'windows-x64'
+        shell: pwsh
+        run: wails build -platform "${{ matrix.platform }}" -nsis
+
+      - name: Package Windows installer
+        if: matrix.artifact == 'windows-x64'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $installer = Get-ChildItem build/bin -Filter "*-installer.exe" | Select-Object -First 1
+          if (-not $installer) { throw "Wails did not produce an NSIS installer" }
+          Copy-Item $installer.FullName "dist/bitcoin++-videos-$env:GITHUB_REF_NAME-windows-x64-setup.exe"
+
+      - name: Build Linux app
+        if: matrix.artifact == 'linux-x64'
+        shell: bash
+        run: wails build -platform "${{ matrix.platform }}" -o bitcoin-videos
+
+      - name: Package Linux app
+        if: matrix.artifact == 'linux-x64'
+        shell: bash
+        run: |
+          mkdir -p dist
+          tar -C build/bin -czf "dist/bitcoin++-videos-${GITHUB_REF_NAME}-linux-x64.tar.gz" bitcoin-videos
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bitcoin-videos-${{ matrix.artifact }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download platform builds
+        uses: actions/download-artifact@v5
+        with:
+          path: release
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: release
+        run: sha256sum * > SHA256SUMS.txt
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release/* \
+              --verify-tag \
+              --title "bitcoin++ videos $GITHUB_REF_NAME" \
+              --generate-notes
+          fi
