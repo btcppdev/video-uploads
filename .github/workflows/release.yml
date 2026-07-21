@@ -67,13 +67,23 @@ jobs:
       - name: Install NSIS
         if: matrix.artifact == 'windows-x64'
         shell: pwsh
-        run: choco install nsis -y --no-progress
+        run: |
+          choco install nsis -y --no-progress
+          $searchRoots = @(
+            "${env:ProgramFiles(x86)}\NSIS",
+            "$env:ProgramFiles\NSIS",
+            "$env:ChocolateyInstall\bin"
+          )
+          $makensis = Get-ChildItem $searchRoots -Filter "makensis.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $makensis) { throw "Chocolatey installed NSIS, but makensis.exe could not be found" }
+          $makensis.Directory.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & $makensis.FullName /VERSION
 
       - name: Install Wails
         shell: bash
         run: |
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-          go install github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}
+          go install "github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}"
 
       - name: Install frontend dependencies
         shell: bash
@@ -151,7 +161,7 @@ jobs:
 
       - name: Generate checksums
         working-directory: release
-        run: sha256sum * > SHA256SUMS.txt
+        run: sha256sum -- * > SHA256SUMS.txt
 
       - name: Create or update release
         env:
