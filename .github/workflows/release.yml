@@ -83,6 +83,7 @@ jobs:
         if: matrix.artifact == 'linux-x64'
         shell: bash
         run: |
+          npm --prefix frontend run build
           go test ./...
           npm --prefix frontend run check
 
