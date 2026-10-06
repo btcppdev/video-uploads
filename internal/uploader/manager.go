@@ -113,6 +113,9 @@ func (m *Manager) signal() {
 func (m *Manager) AddFiles(paths []string, dest Destination) (Snapshot, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if strings.TrimSpace(dest.ConferenceTag) == "" || strings.TrimSpace(dest.Day) == "" || strings.TrimSpace(dest.Room) == "" {
+		return m.snapshotLocked(), fmt.Errorf("choose an event, day, and room before adding files")
+	}
 	known := map[string]bool{}
 	for _, item := range m.state.Items {
 		known[item.Path] = item.Status != "complete" && item.Status != "removed"
@@ -689,6 +692,12 @@ func (m *Manager) Settings() Settings {
 	_, err := keyring.Get(keyringService, "spaces-secret")
 	s.SecretSet = err == nil
 	return s
+}
+
+func (m *Manager) APIBaseURL() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.state.Settings.APIBaseURL
 }
 func (m *Manager) SaveSettings(s Settings) error {
 	if s.SecretKey != "" {

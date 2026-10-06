@@ -18,6 +18,29 @@ func TestCompletedBytes(t *testing.T) {
 	}
 }
 
+func TestHackathonObjectKey(t *testing.T) {
+	d := Destination{ConferenceTag: "toronto", Day: "Day 1", Room: "Hackathon"}
+	got := objectKey(d, "clip.mov")
+	if want := "toronto/recordings/raw/day1/hackathon/clip.mov"; got != want {
+		t.Fatalf("objectKey = %q, want %q", got, want)
+	}
+	conference := d
+	conference.Room = "one"
+	if objectKey(conference, "clip.mov") == got {
+		t.Fatal("hackathon and conference destinations collide")
+	}
+}
+
+func TestAddFilesRequiresDestination(t *testing.T) {
+	m := &Manager{}
+	if _, err := m.AddFiles([]string{"clip.mov"}, Destination{}); err == nil {
+		t.Fatal("expected missing destination error")
+	}
+	if len(m.state.Items) != 0 {
+		t.Fatal("invalid destination changed queue")
+	}
+}
+
 func TestHashedObjectKey(t *testing.T) {
 	got := hashedObjectKey("toronto/recordings/raw/day1/main/clip.mov", "0123456789abcdef")
 	want := "toronto/recordings/raw/day1/main/clip--0123456789ab.mov"

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/bitcoinplusplus/btcpp-video/internal/catalog"
 	"github.com/bitcoinplusplus/btcpp-video/internal/uploader"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -42,6 +43,20 @@ func (a *App) Snapshot() uploader.Snapshot {
 		return uploader.Snapshot{}
 	}
 	return a.mgr.Snapshot()
+}
+
+func (a *App) Conferences() ([]catalog.Conference, error) {
+	if a.mgr == nil {
+		return nil, fmt.Errorf("upload service is not ready")
+	}
+	return catalog.New(a.mgr.APIBaseURL()).Conferences(a.ctx)
+}
+
+func (a *App) UploadContext(tag string) (catalog.UploadContext, error) {
+	if a.mgr == nil {
+		return catalog.UploadContext{}, fmt.Errorf("upload service is not ready")
+	}
+	return catalog.New(a.mgr.APIBaseURL()).UploadContext(a.ctx, tag)
 }
 
 func (a *App) AddFiles(paths []string, destination uploader.Destination) (uploader.Snapshot, error) {
