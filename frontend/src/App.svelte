@@ -5,17 +5,18 @@
 
   let snapshot = { revision:0, items:[], online:true, currentSpeedBps:0, averageSpeedBps:0, sessionUploaded:0, totalBytes:0, uploadedBytes:0, pendingBytes:0 }
   let tab = 'queue', dragging = false, settingsOpen = false, settings = {}, toast = ''
-  let destination = { conferenceId:'toronto', conferenceTag:'toronto', conferenceName:'Bitcoin++ Toronto 2026', day:'Day 1', room:'Main Stage' }
-  const events = [
-    {id:'toronto',tag:'toronto',name:'Bitcoin++ Toronto 2026',meta:'July 22–24 · The Great Hall, Toronto'}
-  ]
-  const rooms = ['Main Stage','Talks Stage']
-  const days = ['Day 1','Day 2','Day 3']
+  let destination = { conferenceId:'', conferenceTag:'', conferenceName:'', day:'', room:'' }
+  let events = [], eventDays = [], hasHackathon = false, loading = true, catalogError = '', hackathonError = ''
+  let requestVersion = 0
+  $: days = eventDays.map(d => `Day ${d.day_number}`)
+  $: rooms = roomsForDay(destination.day, eventDays, hasHackathon)
+  $: canAdd = !loading && !catalogError && !!destination.conferenceTag && days.includes(destination.day) && rooms.includes(destination.room)
 
   onMount(() => {
     const off = onSnapshot(applySnapshot)
     const dropOff = onFileDrop(addPaths)
-    call('Snapshot').then(applySnapshot)
+    call('Snapshot').then(applySnapshot).catch(e => toast=String(e))
+    loadEvents()
     return () => { off?.(); dropOff?.() }
   })
   $: pending = snapshot.items.filter(i => !['complete','duplicate'].includes(i.status)).length
@@ -26,12 +27,13 @@
   function formatBytes(n=0) { if (!n) return '0 B'; const u=['B','KB','MB','GB','TB']; const i=Math.min(Math.floor(Math.log(n)/Math.log(1024)),4); return `${(n/1024**i).toFixed(i>2?2:i?1:0)} ${u[i]}` }
   function formatSpeed(n=0) { return n ? `${formatBytes(n)}/s` : '—' }
   function formatTime(s=0) { if (!s) return '—'; const h=Math.floor(s/3600),m=Math.floor((s%3600)/60); return h?`${h}h ${m}m`:`${Math.max(1,m)} min` }
-  function dayPath(day) { return day.toLowerCase().replaceAll(' ','') }
-  function roomPath(room) { return {'Main Stage':'main','Talks Stage':'talks'}[room] || room.toLowerCase().replaceAll(' ','-') }
+  function cleanPath(value) { return value.trim().toLowerCase().replace(/[ /\\]/g, '-').replace(/^-+|-+$/g, '') }
+  function dayPath(day) { return cleanPath(day).replaceAll('-', '') }
+  function roomPath(room) { return {'main-stage':'main','talks-stage':'talks'}[cleanPath(room)] || cleanPath(room) }
   function selectTab(next) { tab = next }
-  function applySnapshot(next) { if (next && (next.revision ?? 0) > (snapshot.revision ?? 0)) snapshot = next }
-  async function addPaths(paths) { if (!paths?.length) return; try { applySnapshot(await call('AddFiles', paths, destination)); toast=`Added ${paths.length} file${paths.length>1?'s':''} to the queue`; setTimeout(()=>toast='',2800) } catch(e){ toast=String(e) } }
-  async function chooseFiles(){ applySnapshot(await call('SelectVideoFiles', destination)) }
+  function applySnapshot(next) { if (next && (next.revision ?? 0) > (snapshot.revision ?? 0)) snapshot = {...next, items:next.items || []} }
+  async function addPaths(paths) { if (!paths?.length) return; if (!canAdd) { toast='Choose an available event, day, and room first'; return } try { applySnapshot(await call('AddFiles', paths, destination)); toast=`Added ${paths.length} file${paths.length>1?'s':''} to the queue`; setTimeout(()=>toast='',2800) } catch(e){ toast=String(e) } }
+  async function chooseFiles(){ if (!canAdd) return; try { applySnapshot(await call('SelectVideoFiles', destination)) } catch(e) { toast=String(e) } }
   async function action(name,id){ applySnapshot(await call(name,id)) }
   async function toggleAll(){ applySnapshot(await call(snapshot.running?'PauseAll':'ResumeAll')) }
   async function clearCompleted(){
@@ -43,8 +45,49 @@
   function dragover(e){e.preventDefault();dragging=true}
   function drop(e){e.preventDefault();dragging=false; const paths=[...e.dataTransfer.files].map(f=>f.path).filter(Boolean); if(paths.length)addPaths(paths); else {toast='Use “Choose files” in browser preview mode';setTimeout(()=>toast='',2600)} }
   async function openSettings(){ settings=await call('Settings');settingsOpen=true }
-  async function saveSettings(){ await call('SaveSettings',settings);settingsOpen=false;toast='Connection settings saved';setTimeout(()=>toast='',2400) }
-  function setEvent(e){const found=events.find(x=>x.id===e.currentTarget.value);if(found)destination={...destination,conferenceId:found.id,conferenceTag:found.tag,conferenceName:found.name}}
+  async function saveSettings(){
+    try { await call('SaveSettings',settings); settingsOpen=false; toast='Connection settings saved'; setTimeout(()=>toast='',2400); await loadEvents() }
+    catch(e) { toast=String(e) }
+  }
+  async function loadEvents(){
+    const version = ++requestVersion
+    loading=true; catalogError=''; hackathonError=''; eventDays=[]; hasHackathon=false
+    const previous = destination.conferenceId
+    destination = {...destination, day:'', room:''}
+    try {
+      const result = await call('Conferences')
+      if (version !== requestVersion) return
+      events = result
+      const now = Date.now()
+      const upcoming = [...events].filter(e => Date.parse(e.ends_at || e.starts_at) >= now).sort((a,b)=>Date.parse(a.starts_at)-Date.parse(b.starts_at))
+      const selected = events.find(e => e.id === previous) || upcoming[0] || events[0]
+      if (selected) await selectEvent(selected.id)
+      else { destination={conferenceId:'',conferenceTag:'',conferenceName:'',day:'',room:''}; loading=false }
+    } catch(e) { if (version === requestVersion) { catalogError=String(e); loading=false } }
+  }
+  function roomsForDay(day, publishedDays = eventDays, hackathon = hasHackathon){
+    const venues = publishedDays.find(d => `Day ${d.day_number}` === day)?.venues || []
+    return [...new Set([...venues, ...(hackathon && day ? ['Hackathon'] : [])])]
+  }
+  function selectDay(day){
+    const available = roomsForDay(day)
+    destination = {...destination, day, room:available.includes(destination.room) ? destination.room : available[0] || ''}
+  }
+  async function selectEvent(id){
+    const found=events.find(e=>e.id===id)
+    if (!found) return
+    const version = ++requestVersion
+    destination={conferenceId:found.id,conferenceTag:found.tag,conferenceName:found.description,day:'',room:''}
+    loading=true; catalogError=''; hackathonError=''; eventDays=[]; hasHackathon=false
+    try {
+      const context = await call('UploadContext',found.tag)
+      if (version !== requestVersion) return
+      eventDays=context.days; hasHackathon=context.hasHackathon; hackathonError=context.hackathonError || ''
+      selectDay(eventDays.length ? `Day ${eventDays[0].day_number}` : '')
+    } catch(e) { if (version === requestVersion) catalogError=String(e) }
+    finally { if (version === requestVersion) loading=false }
+  }
+
 </script>
 
 <svelte:head><title>bitcoin++ videos</title></svelte:head>
@@ -60,17 +103,23 @@
     <section class="intro">
       <div><p class="eyebrow">FIELD UPLOAD / ROUGH MIXES</p><h1>Get the footage<br><em>off the card.</em></h1><p class="lede">Drop recordings here. We’ll keep them moving—even when the venue Wi-Fi doesn’t.</p></div>
       <div class="destination-card">
-        <div class="card-label"><span>UPLOAD DESTINATION</span><span class="auto"><i></i>TORONTO FIELD DEFAULT</span></div>
-        <label>Event<select value={destination.conferenceId} onchange={setEvent}>{#each events as e}<option value={e.id}>{e.name}</option>{/each}</select><small>{events.find(e=>e.id===destination.conferenceId)?.meta}</small></label>
-        <div class="split"><label>Day<select bind:value={destination.day}>{#each days as d}<option>{d}</option>{/each}</select></label><label>Room<select bind:value={destination.room}>{#each rooms as r}<option>{r}</option>{/each}</select></label></div>
-        <div class="path">SPACES / <b>{destination.conferenceTag}</b> / recordings / raw / {dayPath(destination.day)} / {roomPath(destination.room)}</div>
+        <div class="card-label"><span>UPLOAD DESTINATION</span><span class="auto"><i></i>{loading ? 'LOADING…' : isDesktop() ? 'BITCOIN++ API' : 'PREVIEW DATA'}</span></div>
+        <label>Event<select value={destination.conferenceId} onchange={e=>selectEvent(e.currentTarget.value)} disabled={!events.length}><option value="" disabled>Choose an event</option>{#each events as e}<option value={e.id}>{e.description || e.tag}</option>{/each}</select><small>{events.find(e=>e.id===destination.conferenceId)?.location || ''}</small></label>
+        {#if catalogError}<p class="catalog-error" role="alert">{catalogError}</p>{/if}
+        {#if hackathonError}<p class="catalog-error" role="alert">{hackathonError}</p>{/if}
+        {#if !loading && !catalogError && !events.length}<p>No published events are available.</p>{/if}
+        <div class="split"><label>Day<select value={destination.day} onchange={e=>selectDay(e.currentTarget.value)} disabled={loading || !days.length}><option value="" disabled>Choose a day</option>{#each days as d}<option>{d}</option>{/each}</select></label><label>Room<select bind:value={destination.room} disabled={loading || !rooms.length}><option value="" disabled>Choose a room</option>{#each rooms as r}<option>{r}</option>{/each}</select></label></div>
+        {#if !loading && !catalogError && events.length && (!days.length || !rooms.length)}<p>No {days.length ? 'rooms' : 'days'} published for this selection yet.</p>{/if}
+        {#if destination.room === 'Hackathon'}<small>Hackathon footage for the selected day.</small>{/if}
+        {#if canAdd}<div class="path">SPACES / <b>{cleanPath(destination.conferenceTag)}</b> / recordings / raw / {dayPath(destination.day)} / {roomPath(destination.room)}</div>{/if}
+        <button class="refresh-events" onclick={loadEvents} disabled={loading}>Refresh events</button>
       </div>
     </section>
 
     <section class:active={dragging} class="dropzone">
       <div class="drop-icon"><svg viewBox="0 0 24 24">{@html icon('upload')}</svg></div>
       <div><h2>{dragging?'Drop to add recordings':'Drop video files here'}</h2><p>MOV, MP4, MXF, MTS and more · Files stay on the card while uploading</p></div>
-      <button class="choose" onclick={chooseFiles}>Choose files</button>
+      <button class="choose" onclick={chooseFiles} disabled={!canAdd}>Choose files</button>
     </section>
 
     <section class="metrics">
@@ -93,7 +142,7 @@
         {#each visible as item (item.id)}
           <article class:done={['complete','duplicate'].includes(item.status)} class:error={item.status==='error'}>
             <div class="file-icon"><svg viewBox="0 0 24 24">{@html icon(['complete','duplicate'].includes(item.status)?'check':'film')}</svg></div>
-            <div class="file-main"><div class="file-title"><strong>{item.name}</strong><span>{item.destination.room} · {item.destination.day}</span></div><div class="file-progress"><div class="bar"><i style={`width:${item.status==='hashing'?(item.size?item.hashProgress/item.size*100:0):(item.size?item.uploaded/item.size*100:0)}%`}></i></div><span>{Math.round(item.status==='hashing'?(item.size?item.hashProgress/item.size*100:0):(item.size?item.uploaded/item.size*100:0))}%</span></div><small>{item.error || (item.status==='hashing' ? `Fingerprinting ${formatBytes(item.hashProgress)} of ${formatBytes(item.size)}` : `${formatBytes(item.uploaded)} of ${formatBytes(item.size)}`)}{#if item.sha256} · SHA-256 {item.sha256.slice(0,12)}…{/if}</small></div>
+            <div class="file-main"><div class="file-title"><strong>{item.name}</strong><span>{item.destination.conferenceName || item.destination.conferenceTag} · {item.destination.room} · {item.destination.day}</span></div><div class="file-progress"><div class="bar"><i style={`width:${item.status==='hashing'?(item.size?item.hashProgress/item.size*100:0):(item.size?item.uploaded/item.size*100:0)}%`}></i></div><span>{Math.round(item.status==='hashing'?(item.size?item.hashProgress/item.size*100:0):(item.size?item.uploaded/item.size*100:0))}%</span></div><small>{item.error || (item.status==='hashing' ? `Fingerprinting ${formatBytes(item.hashProgress)} of ${formatBytes(item.size)}` : `${formatBytes(item.uploaded)} of ${formatBytes(item.size)}`)}{#if item.sha256} · SHA-256 {item.sha256.slice(0,12)}…{/if}</small></div>
             <div class="file-stat">{#if item.status==='uploading'}<strong>{formatSpeed(item.speedBps)}</strong><span>{formatTime(item.etaSeconds)} left</span>{:else if item.status==='hashing'}<strong>Checking</strong><span>SHA-256</span>{:else if item.status==='duplicate'}<strong>Duplicate</strong><span>Skipped safely</span>{:else if item.status==='complete'}<strong>Uploaded</strong><span>{formatBytes(item.size)}</span>{:else}<strong>{item.status==='waiting'?'Reconnecting':item.status[0].toUpperCase()+item.status.slice(1)}</strong><span>{formatBytes(item.size-item.uploaded)} left</span>{/if}</div>
             {#if !['complete','duplicate'].includes(item.status)}<button class="row-action" aria-label={['uploading','hashing'].includes(item.status)?'Pause':'Resume'} onclick={()=>action(['uploading','hashing'].includes(item.status)?'Pause':'Resume',item.id)}><svg viewBox="0 0 24 24">{@html icon(['uploading','hashing'].includes(item.status)?'pause':'play')}</svg></button>{/if}
             <button class="row-action subtle" aria-label="Remove file" onclick={()=>action('Remove',item.id)}><svg viewBox="0 0 24 24">{@html icon('trash')}</svg></button>

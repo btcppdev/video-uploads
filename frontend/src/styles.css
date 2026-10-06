@@ -664,3 +664,7 @@ footer strong {
     font-size: 42px;
   }
 }
+
+button:disabled, select:disabled { opacity: .5; cursor: not-allowed; }
+.catalog-error { color: #ab342e; font-size: 13px; overflow-wrap: anywhere; }
+.refresh-events { margin-top: 12px; background: none; border: 0; text-decoration: underline; font: inherit; font-size: 12px; cursor: pointer; }
