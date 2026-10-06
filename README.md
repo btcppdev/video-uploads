@@ -10,6 +10,8 @@ A resilient field uploader for Bitcoin++ conference recordings. It is a Wails v2
 - Per-file and overall progress, current/average upload speed, remaining bytes, and ETA.
 - Pause/resume/remove controls and automatic continuation after transient failures.
 - SHA-256 fingerprinting before transfer, local and remote duplicate detection, and collision-safe object names.
+- Events, days, and rooms load from the public Bitcoin++ API.
+- Hackathon footage is available for events with a published hackathon.
 - Conference, day, and room metadata are captured with every queued file.
 - Spaces secrets are stored in the operating system keychain, not the queue file.
 
@@ -59,7 +61,7 @@ Open the gear menu and provide endpoint, region, bucket, access key, and secret.
 {conference-tag}/recordings/raw/{day}/{room}/{original-filename}
 ```
 
-For Toronto, the UI maps the field labels to compact path segments, for example `Day 1` + `Main Stage` becomes `toronto/recordings/raw/day1/main/filename.mov` and `Talks Stage` becomes `talks`.
+Days become compact path segments (`Day 1` → `day1`). Room names come directly from the API and are lowercased with spaces replaced by hyphens; the legacy `Main Stage` → `main` and `Talks Stage` → `talks` mappings remain supported. Select `Hackathon` under **Room** to upload footage for the selected day to `{conference-tag}/recordings/raw/{day}/hackathon/{original-filename}`. This room option is available only for events with a published hackathon.
 
 Before uploading, the app computes the file's SHA-256 digest. Stored video keys receive a 12-character digest suffix (`filename--a1b2c3d4e5f6.mov`) so distinct recordings can never overwrite each other. Each upload directory also receives an immutable marker at `_manifest/sha256/{full-hash}.json` containing the original filename, final object key, size, and upload time. If that marker—or the same local fingerprint—already exists, the duplicate is skipped.
 
@@ -67,7 +69,11 @@ The uploader creates private objects by default. Access/publishing should be man
 
 ## Bitcoin++ API integration
 
-The UI currently carries a small local event list so field testing is not blocked while the API is being built. The intended API contract is documented in [docs/backend-api.md](docs/backend-api.md). The next integration step is replacing that list with the returned upload context and using short-lived credentials from the backend instead of long-lived volunteer-entered keys.
+The desktop app reads published events from `GET /api/v1/conferences`, days and rooms from `GET /api/v1/conferences/{tag}/days`, and hackathon availability from `GET /api/v1/conferences/{tag}/hackathons`. These public reads require no authentication. Configure the API base URL in settings (default `https://btcpp.dev`; a URL ending in `/api/v1` is also accepted).
+
+The app initially selects the current or nearest upcoming event, keeps past events available, and updates rooms when the event or day changes. Loading failures offer **Refresh events**; missing days or rooms prevent adding new files. A failed hackathon check displays a warning and leaves regular day uploads available. Existing queued uploads continue independently of the catalog. Browser preview uses explicitly labeled sample data.
+
+Only published hackathons can be detected; an empty list does not reveal private or unpublished hackathons. The app adds `Hackathon` to the Room dropdown when the API reports a published hackathon. Spaces credentials are still configured separately and stored in the OS keychain. See [docs/backend-api.md](docs/backend-api.md) for the implemented catalog contract and future credential integration.
 
 ## Reliability notes
 
