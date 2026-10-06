@@ -67,7 +67,7 @@
   }
   function roomsForDay(day, publishedDays = eventDays, hackathon = hasHackathon){
     const venues = publishedDays.find(d => `Day ${d.day_number}` === day)?.venues || []
-    return [...new Set([...venues, ...(hackathon && day ? ['Hackathon'] : [])])]
+    return [...new Set([...venues, ...(hackathon && day ? ['Hackathon'] : []), ...(day ? ['Insider interviews'] : [])])]
   }
   function selectDay(day){
     const available = roomsForDay(day)
@@ -111,6 +111,7 @@
         <div class="split"><label>Day<select value={destination.day} onchange={e=>selectDay(e.currentTarget.value)} disabled={loading || !days.length}><option value="" disabled>Choose a day</option>{#each days as d}<option>{d}</option>{/each}</select></label><label>Room<select bind:value={destination.room} disabled={loading || !rooms.length}><option value="" disabled>Choose a room</option>{#each rooms as r}<option>{r}</option>{/each}</select></label></div>
         {#if !loading && !catalogError && events.length && (!days.length || !rooms.length)}<p>No {days.length ? 'rooms' : 'days'} published for this selection yet.</p>{/if}
         {#if destination.room === 'Hackathon'}<small>Hackathon footage for the selected day.</small>{/if}
+        {#if destination.room === 'Insider interviews'}<small>Insider interview footage for the selected day.</small>{/if}
         {#if canAdd}<div class="path">SPACES / <b>{cleanPath(destination.conferenceTag)}</b> / recordings / raw / {dayPath(destination.day)} / {roomPath(destination.room)}</div>{/if}
         <button class="refresh-events" onclick={loadEvents} disabled={loading}>Refresh events</button>
       </div>

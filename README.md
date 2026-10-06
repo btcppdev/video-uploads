@@ -12,6 +12,7 @@ A resilient field uploader for Bitcoin++ conference recordings. It is a Wails v2
 - SHA-256 fingerprinting before transfer, local and remote duplicate detection, and collision-safe object names.
 - Events, days, and rooms load from the public Bitcoin++ API.
 - Hackathon footage is available for events with a published hackathon.
+- Insider interviews are available as a Room option for every published event day.
 - Conference, day, and room metadata are captured with every queued file.
 - Spaces secrets are stored in the operating system keychain, not the queue file.
 
@@ -70,6 +71,8 @@ The uploader creates private objects by default. Access/publishing should be man
 ## Bitcoin++ API integration
 
 The desktop app reads published events from `GET /api/v1/conferences`, days and rooms from `GET /api/v1/conferences/{tag}/days`, and hackathon availability from `GET /api/v1/conferences/{tag}/hackathons`. These public reads require no authentication. Configure the API base URL in settings (default `https://btcpp.dev`; a URL ending in `/api/v1` is also accepted).
+
+Select `Insider interviews` under **Room** for interview footage. This option is available for every published event day and uploads to `{conference-tag}/recordings/raw/{day}/insider-interviews/{original-filename}`.
 
 The app initially selects the current or nearest upcoming event, keeps past events available, and updates rooms when the event or day changes. Loading failures offer **Refresh events**; missing days or rooms prevent adding new files. A failed hackathon check displays a warning and leaves regular day uploads available. Existing queued uploads continue independently of the catalog. Browser preview uses explicitly labeled sample data.
 

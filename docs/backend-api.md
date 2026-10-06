@@ -10,7 +10,9 @@ Responses wrap results in `{ "data": ..., "meta": ... }`. Requests run through t
 
 Normal footage retains `{tag}/recordings/raw/day{number}/{room}/{filename}`. Hackathon footage uses `{tag}/recordings/raw/day{number}/hackathon/{filename}`, including the usual hash suffix and per-directory duplicate manifests. `destination.room` stores `Hackathon`, while `destination.day` retains the selected day, preserving the queue schema and existing queued paths. The app adds this room option when the API reports a published hackathon.
 
-Events without published days cannot accept new footage yet. Days without venues can only accept hackathon footage when a published hackathon exists. The catalog is fetched on startup and refresh, and after saving settings; it is not cached for offline destination selection. Previously queued transfers remain resumable independently.
+`Insider interviews` is an additional Room option for every published event day, independent of hackathon availability. It uses `{tag}/recordings/raw/day{number}/insider-interviews/{filename}` and stores `Insider interviews` in `destination.room`.
+
+Events without published days cannot accept new footage yet. Days without venues can accept insider interviews, plus hackathon footage when a published hackathon exists. The catalog is fetched on startup and refresh, and after saving settings; it is not cached for offline destination selection. Previously queued transfers remain resumable independently.
 
 ## Future authenticated upload API (proposal; not implemented)
 
